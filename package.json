@@ -9,6 +9,7 @@
   "dependencies": {
     "@google/genai": "latest",
     "dotenv": "latest",
-    "express": "latest"
+    "express": "latest",
+    "groq-sdk": "^1.5.0"
   }
 }
