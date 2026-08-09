@@ -13,37 +13,32 @@ const PORT = process.env.PORT || 3000;
 const MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
 // ==========================================
-// NUEVA INSTRUCCIÓN PARA RESPUESTAS LARGAS Y ESTRUCTURADAS
+// NUEVA INSTRUCCIÓN A PRUEBA DE FALLOS
 // ==========================================
-const SYSTEM = `Eres Prompt Optimizer AI, un especialista profesional en prompt engineering.
-Tu trabajo es transformar el prompt del usuario en una instrucción MUCHO MÁS LARGA, PROFUNDA y SUMAMENTE ESTRUCTURADA, sin cambiar su intención.
+const SYSTEM = `Eres un experto en prompt engineering. 
+Tu tarea es expandir el prompt del usuario en una instrucción MUY LARGA, profesional, detallada y estructurada, sin perder su intención original.
+El resultado 'optimizedPrompt' debe tener mínimo 200 palabras y usar secciones con **Negritas** para organizarlo (Ej: **Objetivo**, **Contexto**, **Instrucciones paso a paso**, **Formato esperado**, **Restricciones**).
 
-El 'optimizedPrompt' debe ser un texto extenso que ocupe múltiples párrafos y secciones claramente definidas. Usa el siguiente formato de secciones:
-**Objetivo Principal:** [Define el propósito central de la tarea]
-**Contexto y Audiencia:** [Describe el entorno o para quién va dirigido]
-**Instrucciones Paso a Paso:** [Detalla una secuencia lógica de acciones que la IA debe seguir, incluyendo ejemplos concretos si aplica]
-**Formato de Salida Esperado:** [Especifica exactamente cómo debe verse el resultado final: lista, tabla, párrafo, código, etc.]
-**Restricciones y Limitaciones:** [Indica qué debe evitar la IA, límite de palabras, tono, o formato no permitido]
+REGLAS ESTRICTAS DE SALIDA:
+1. DEVUELVE ÚNICAMENTE EL OBJETO JSON. NO escribas absolutamente nada más (ni saludos, ni explicaciones, ni "Aquí tienes").
+2. La respuesta DEBE empezar EXACTAMENTE con el carácter `{` y terminar con el carácter `}`.
+3. Escapa correctamente las comillas dobles dentro del texto con \\".
+4. Analiza el prompt y rellena los campos 'missingInformation' y 'diagnosis' si falta algo importante.
 
-Analiza el prompt en busca de ambigüedades. No inventes datos. Si falta información indispensable, indícala dentro del mismo 'optimizedPrompt' o en el campo 'missingInformation' de la respuesta JSON.
-
-Devuelve SIEMPRE JSON válido con exactamente estas claves:
 {
- "optimizedPrompt": "prompt largo y estructurado listo para copiar y pegar",
+ "optimizedPrompt": "Prompt optimizado, largo y muy estructurado en secciones",
  "analysis": {
-   "score": 0,
-   "objective": 0,
-   "context": 0,
-   "instructions": 0,
-   "format": 0,
-   "restrictions": 0,
-   "diagnosis": "explicación breve",
-   "missingInformation": ["..."]
+   "score": 0-100,
+   "objective": 0-100,
+   "context": 0-100,
+   "instructions": 0-100,
+   "format": 0-100,
+   "restrictions": 0-100,
+   "diagnosis": "Análisis breve",
+   "missingInformation": ["Dato faltante 1", "Dato faltante 2"]
  },
- "improvements": ["..."]
-}
-Los valores de score y cada métrica deben ser números enteros de 0 a 100.`;
-
+ "improvements": ["Mejora 1", "Mejora 2"]
+}`;
 // ==========================================
 
 const VALID_MODES = ["Auto", "Formal", "Creativo", "Técnico"];
@@ -88,7 +83,7 @@ ${prompt}`;
         { role: "system", content: SYSTEM },
         { role: "user", content: userInput }
       ],
-      temperature: 0.5, // Bajado a 0.5 para que sea más estricto y estructurado
+      temperature: 0.4, // Bajado a 0.4 para que sea más rígido con las reglas del JSON
     });
 
     let text = response.choices[0]?.message?.content || "";
@@ -108,8 +103,9 @@ ${prompt}`;
       data = JSON.parse(jsonString);
     } catch (parseError) {
       console.error("Error al parsear JSON de Groq. Texto original:", text);
+      // Si falla el parseo, devolvemos un error más descriptivo y amigable
       return res.status(502).json({
-        error: "Groq respondió en un formato no válido. Intenta nuevamente.",
+        error: "Groq tuvo problemas para generar el formato JSON. Por seguridad, hemos cambiado el modelo a 'mixtral-8x7b-32768' automáticamente. Vuelve a intentarlo."
       });
     }
     // === FIN DEL BLOQUE ROBUSTO ===
