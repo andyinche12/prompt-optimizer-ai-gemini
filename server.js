@@ -3,7 +3,7 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Groq from "groq-sdk";
-import json5 from "json5"; // <--- NUEVA LIBRERÍA AÑADIDA
+import json5 from "json5"; // <--- ESTA LIBRERÍA ES LA QUE SALVA EL FORMATO
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -14,13 +14,28 @@ const PORT = process.env.PORT || 3000;
 const MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
 const SYSTEM = `Eres un experto en prompt engineering.
-Tu tarea es expandir el prompt del usuario en una instrucción MUY LARGA (mínimo 200 palabras), profesional, detallada y estructurada, sin perder la intención original.
-El campo 'optimizedPrompt' debe ser UN TEXTO LARGO (string).
-NUNCA uses llaves {} dentro del contenido de optimizedPrompt. Usa **Negritas** para los títulos de las secciones y \\n para saltos de línea.
-REGLAS ESTRICTAS DE SALIDA:
-1. DEVUELVE ÚNICAMENTE EL OBJETO JSON. NO añadas saludos ni explicaciones.
-2. Sigue EXACTAMENTE este molde:
-{ "optimizedPrompt": "**Objetivo Principal:** texto... \\n**Contexto:** texto... \\n**Instrucciones:** pasos... \\n**Formato:** formato... \\n**Restricciones:** límites...", "analysis": { "score": 0, "objective": 0, "context": 0, "instructions": 0, "format": 0, "restrictions": 0, "diagnosis": "diagnóstico", "missingInformation": ["Falta 1", "Falta 2"] }, "improvements": ["Mejora 1", "Mejora 2"] }`;
+Tu tarea es expandir el prompt del usuario en una instrucción MUY LARGA (mínimo 200 palabras), profesional y estructurada, sin perder la intención original.
+El 'optimizedPrompt' debe ser un TEXTO. Usa **Negritas** para los títulos y \\n para saltos de línea.
+
+REGLAS DE PUNTUACIÓN (OBLIGATORIO):
+- Debes analizar el prompt y asignar un número entero del 0 al 100 a: objective, context, instructions, format, restrictions.
+- El campo 'score' debe ser el PROMEDIO de la suma de los 5 valores anteriores.
+
+EJEMPLO DE ESTRUCTURA DEL JSON FINAL (DEBES SEGUIR ESTE MOLDE):
+{
+  "optimizedPrompt": "Texto largo y optimizado...",
+  "analysis": {
+    "score": 85,
+    "objective": 90,
+    "context": 80,
+    "instructions": 90,
+    "format": 70,
+    "restrictions": 90,
+    "diagnosis": "Tu análisis aquí",
+    "missingInformation": ["Dato 1", "Dato 2"]
+  },
+  "improvements": ["Mejora 1", "Mejora 2"]
+}`;
 
 const VALID_MODES = ["Auto", "Formal", "Creativo", "Técnico"];
 const VALID_DETAILS = ["Resumido", "Equilibrado", "Detallado"];
@@ -73,7 +88,6 @@ ${prompt}`;
 
     let text = response.choices[0]?.message?.content || "";
 
-    // === BLOQUE DE EXTRACCIÓN DE JSON (AHORA CON JSON5) ===
     let cleanText = text.replace(/```json\s*/gi, "").replace(/```/gi, "").trim();
     const startIdx = cleanText.indexOf('{');
     const endIdx = cleanText.lastIndexOf('}');
@@ -85,22 +99,29 @@ ${prompt}`;
 
     let data;
     try {
-      // Intento estándar
-      data = JSON.parse(jsonString);
+      data = json5.parse(jsonString); 
     } catch (parseError) {
-      console.warn("JSON estándar falló. Intentando reparar con JSON5...");
-      try {
-        // Usamos JSON5, que es tolerante a saltos de línea literales y comillas sueltas
-        data = json5.parse(jsonString);
-        console.log("JSON reparado exitosamente con JSON5.");
-      } catch (json5Error) {
-        console.error("Error al parsear JSON de Groq incluso con JSON5. Texto original:", text);
-        return res.status(502).json({
-          error: "Groq generó un formato de JSON incorrecto. Vuelve a intentarlo.",
-        });
-      }
+      console.error("Error al parsear JSON de Groq. Texto original:", text);
+      return res.status(502).json({
+        error: "Groq generó un formato de JSON incorrecto. Vuelve a intentarlo.",
+      });
     }
-    // === FIN DEL BLOQUE ===
+
+    // 🛡️ SEGURO FINAL DE PUNTUACIÓN (Esto evita que salgan en 0)
+    const metrics = ['objective', 'context', 'instructions', 'format', 'restrictions'];
+    if (data.analysis) {
+        let total = 0;
+        metrics.forEach(m => {
+            if (typeof data.analysis[m] !== 'number' || isNaN(data.analysis[m])) {
+                data.analysis[m] = 0;
+            }
+            total += data.analysis[m];
+        });
+        // Si la IA se olvidó de poner el promedio, el código lo calcula solo
+        if (typeof data.analysis.score !== 'number' || isNaN(data.analysis.score)) {
+            data.analysis.score = Math.round(total / metrics.length);
+        }
+    }
 
     if (data.optimizedPrompt && typeof data.optimizedPrompt === 'object') {
         data.optimizedPrompt = JSON.stringify(data.optimizedPrompt, null, 2);
