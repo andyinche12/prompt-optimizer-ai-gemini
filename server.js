@@ -13,32 +13,18 @@ const PORT = process.env.PORT || 3000;
 const MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
 // ==========================================
-// NUEVA INSTRUCCIÓN A PRUEBA DE FALLOS
+// INSTRUCCIÓN REESCRITA PARA EVITAR ERRORES DE CÓPIA
 // ==========================================
-const SYSTEM = `Eres un experto en prompt engineering. 
-Tu tarea es expandir el prompt del usuario en una instrucción MUY LARGA, profesional, detallada y estructurada, sin perder su intención original.
-El resultado 'optimizedPrompt' debe tener mínimo 200 palabras y usar secciones con **Negritas** para organizarlo (Ej: **Objetivo**, **Contexto**, **Instrucciones paso a paso**, **Formato esperado**, **Restricciones**).
+const SYSTEM = 
+    "Eres un experto en prompt engineering. " +
+    "Tu tarea es expandir el prompt del usuario en una instrucción MUY LARGA, profesional, detallada y estructurada, sin perder su intención original. " +
+    "El resultado 'optimizedPrompt' debe tener mínimo 200 palabras y usar secciones con **Negritas** para organizarlo (Ej: **Objetivo**, **Contexto**, **Instrucciones paso a paso**, **Formato esperado**, **Restricciones**). " +
+    "REGLAS ESTRICTAS DE SALIDA: " +
+    "1. DEVUELVE ÚNICAMENTE EL OBJETO JSON. NO escribas absolutamente nada más (ni saludos, ni explicaciones, ni \"Aquí tienes\"). " +
+    "2. La respuesta DEBE empezar EXACTAMENTE con el carácter '{' y terminar con el carácter '}'. " +
+    "3. Escapa correctamente las comillas dobles dentro del texto con \\\". " +
+    "4. Analiza el prompt y rellena los campos 'missingInformation' y 'diagnosis' si falta algo importante.";
 
-REGLAS ESTRICTAS DE SALIDA:
-1. DEVUELVE ÚNICAMENTE EL OBJETO JSON. NO escribas absolutamente nada más (ni saludos, ni explicaciones, ni "Aquí tienes").
-2. La respuesta DEBE empezar EXACTAMENTE con el carácter `{` y terminar con el carácter `}`.
-3. Escapa correctamente las comillas dobles dentro del texto con \\".
-4. Analiza el prompt y rellena los campos 'missingInformation' y 'diagnosis' si falta algo importante.
-
-{
- "optimizedPrompt": "Prompt optimizado, largo y muy estructurado en secciones",
- "analysis": {
-   "score": 0-100,
-   "objective": 0-100,
-   "context": 0-100,
-   "instructions": 0-100,
-   "format": 0-100,
-   "restrictions": 0-100,
-   "diagnosis": "Análisis breve",
-   "missingInformation": ["Dato faltante 1", "Dato faltante 2"]
- },
- "improvements": ["Mejora 1", "Mejora 2"]
-}`;
 // ==========================================
 
 const VALID_MODES = ["Auto", "Formal", "Creativo", "Técnico"];
@@ -83,7 +69,7 @@ ${prompt}`;
         { role: "system", content: SYSTEM },
         { role: "user", content: userInput }
       ],
-      temperature: 0.4, // Bajado a 0.4 para que sea más rígido con las reglas del JSON
+      temperature: 0.4, // Temperatura baja para ser estricto con el JSON
     });
 
     let text = response.choices[0]?.message?.content || "";
@@ -103,9 +89,8 @@ ${prompt}`;
       data = JSON.parse(jsonString);
     } catch (parseError) {
       console.error("Error al parsear JSON de Groq. Texto original:", text);
-      // Si falla el parseo, devolvemos un error más descriptivo y amigable
       return res.status(502).json({
-        error: "Groq tuvo problemas para generar el formato JSON. Por seguridad, hemos cambiado el modelo a 'mixtral-8x7b-32768' automáticamente. Vuelve a intentarlo."
+        error: "Groq tuvo problemas para generar el formato JSON. Asegúrate de que el modelo soporte JSON estricto.",
       });
     }
     // === FIN DEL BLOQUE ROBUSTO ===
