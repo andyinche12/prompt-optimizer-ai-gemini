@@ -12,7 +12,7 @@ app.use(express.static(path.join(__dirname, "public")));
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
 
-// Instrucción del sistema (sin cambios)
+// Instrucción del sistema
 const SYSTEM = `Eres Prompt Optimizer AI, un especialista profesional en prompt engineering.
 Tu trabajo es transformar el prompt del usuario en una instrucción mucho más clara, precisa y útil SIN cambiar su intención.
 Analiza objetivo, contexto, instrucciones, formato, restricciones y ambigüedades.
@@ -35,7 +35,7 @@ Devuelve SIEMPRE JSON válido con exactamente estas claves:
 }
 Los valores de score y cada métrica deben ser números enteros de 0 a 100.`;
 
-// Validación de modos y niveles de detalle (para evitar entradas no deseadas)
+// Validación de modos y niveles de detalle
 const VALID_MODES = ["Auto", "Formal", "Creativo", "Técnico"];
 const VALID_DETAILS = ["Resumido", "Equilibrado", "Detallado"];
 
@@ -60,7 +60,7 @@ app.post("/api/optimize", async (req, res) => {
       return res.status(400).json({ error: "Escribe un prompt primero." });
     }
 
-    // Sanitizar valores (si no son válidos, usar defaults)
+    // Sanitizar valores
     const finalMode = VALID_MODES.includes(mode) ? mode : "Auto";
     const finalDetail = VALID_DETAILS.includes(detail) ? detail : "Equilibrado";
 
@@ -77,19 +77,18 @@ ${prompt}`;
     // Inicializar el cliente de Gemini
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-    // Usamos el método más estable: generateContent
     const response = await ai.models.generateContent({
       model: MODEL,
       contents: [{ role: "user", parts: [{ text: userInput }] }],
       config: {
         systemInstruction: SYSTEM,
-        temperature: 0.7, // Control de creatividad (0 = más exacto, 1 = más creativo)
+        temperature: 0.7,
       },
     });
 
-    // Obtener el texto de respuesta (el método .text es el más estándar en el SDK)
-   ("Tipo de response.text:", typeof response.text, response.text);
-let text = response.text || "";
+    // Extraer texto (el SDK actual usa response.text como propiedad string)
+    let text = response.text || "";
+
     // Limpiar posibles marcadores de código Markdown
     text = text.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
 
@@ -98,7 +97,6 @@ let text = response.text || "";
     try {
       data = JSON.parse(text);
     } catch (parseError) {
-      // Log del error y del texto para depuración (solo en consola)
       console.error("Error al parsear JSON de Gemini. Texto recibido:", text);
       return res.status(502).json({
         error: "Gemini respondió en un formato no válido. Intenta nuevamente.",
@@ -107,9 +105,22 @@ let text = response.text || "";
 
     // Devolver la respuesta exitosa
     res.json(data);
+
   } catch (err) {
-    // Capturar cualquier otro error (de red, SDK, etc.)
+    // Capturar errores de red, SDK, o cuota excedida
     console.error("Error en /api/optimize:", err);
+
+    // Manejo específico del error 429 (Cuota excedida de Google)
+    const isQuotaError = (err.status === 429) || 
+                         (err.message && err.message.toLowerCase().includes('quota'));
+
+    if (isQuotaError) {
+      return res.status(429).json({
+        error: "⚠️ Límite de peticiones excedido. Espera 1 minuto y vuelve a intentarlo, o agrega un método de pago en Google AI Studio para eliminar este límite y usar la app sin restricciones."
+      });
+    }
+
+    // Cualquier otro error inesperado
     res.status(500).json({
       error: err?.message || "Error al consultar Gemini.",
     });
