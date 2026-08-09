@@ -10,25 +10,24 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = process.env.PORT || 3000;
-// CAMBIO CRUCIAL: Usamos Mixtral, que es un experto en JSON perfecto
+// Modelo recomendado: mixtral-8x7b-32768. Si no funciona, puedes cambiarlo a llama-3.3-70b-versatile
 const MODEL = process.env.GROQ_MODEL || "mixtral-8x7b-32768";
 
 // ==========================================
-// INSTRUCCIÓN CON MOLDE EXPLÍCITO
+// INSTRUCCIÓN SISTEMA (Reforzada)
 // ==========================================
 const SYSTEM = 
     "Eres un experto en prompt engineering. " +
-    "Tu tarea es expandir el prompt del usuario en una instrucción MUY LARGA, profesional, detallada y estructurada, sin perder su intención original. " +
-    "El campo 'optimizedPrompt' debe ser un TEXTO LARGO de al menos 200 palabras, con saltos de línea y usando **Negritas** para los títulos de las secciones. " +
-    "NUNCA devuelvas un objeto JSON dentro de 'optimizedPrompt' (no uses llaves {} dentro del valor). El valor debe ser un string de texto plano. " +
+    "Expande el prompt del usuario en una instrucción MUY LARGA (mínimo 200 palabras), profesional, detallada y estructurada, sin perder la intención original. " +
+    "IMPORTANTE: El campo 'optimizedPrompt' debe ser UN TEXTO LARGO (string), NO un objeto JSON. " +
+    "NUNCA uses llaves `{}` dentro del contenido de optimizedPrompt para delimitar secciones. " +
+    "Usa **Negritas** para los títulos de las secciones y saltos de línea `\\n` para separar párrafos. " +
     "REGLAS ESTRICTAS DE SALIDA: " +
-    "1. DEVUELVE ÚNICAMENTE EL OBJETO JSON. NO escribas absolutamente nada más. " +
-    "2. Sigue EXACTAMENTE este molde, sin modificar las claves: " +
-    "{ \"optimizedPrompt\": \"**Objetivo Principal:** texto del objetivo... \\n**Contexto:** texto del contexto... \\n**Instrucciones:** pasos... \\n**Formato:** formato esperado... \\n**Restricciones:** limitaciones...\", " +
+    "1. DEVUELVE ÚNICAMENTE EL OBJETO JSON. NO añadas saludos ni explicaciones. " +
+    "2. Sigue EXACTAMENTE este molde: " +
+    "{ \"optimizedPrompt\": \"**Objetivo Principal:** texto... \\n**Contexto:** texto... \\n**Instrucciones:** pasos... \\n**Formato:** formato... \\n**Restricciones:** límites...\", " +
     "\"analysis\": { \"score\": 0, \"objective\": 0, \"context\": 0, \"instructions\": 0, \"format\": 0, \"restrictions\": 0, \"diagnosis\": \"diagnóstico\", \"missingInformation\": [\"Falta 1\", \"Falta 2\"] }, " +
     "\"improvements\": [\"Mejora 1\", \"Mejora 2\"] }";
-
-// ==========================================
 
 const VALID_MODES = ["Auto", "Formal", "Creativo", "Técnico"];
 const VALID_DETAILS = ["Resumido", "Equilibrado", "Detallado"];
@@ -72,7 +71,7 @@ ${prompt}`;
         { role: "system", content: SYSTEM },
         { role: "user", content: userInput }
       ],
-      temperature: 0.1, // Bajísima temperatura para que siga el molde al 100%
+      temperature: 0.2, // Temperatura baja para que siga el molde al 100%
     });
 
     let text = response.choices[0]?.message?.content || "";
@@ -98,6 +97,12 @@ ${prompt}`;
     }
     // === FIN DEL BLOQUE ROBUSTO ===
 
+    // 🛡️ ESCUDO DE SEGURIDAD: Si la IA se equivoca y mete un objeto dentro de optimizedPrompt, lo convierte a texto
+    if (data.optimizedPrompt && typeof data.optimizedPrompt === 'object') {
+        data.optimizedPrompt = JSON.stringify(data.optimizedPrompt, null, 2);
+    }
+
+    // Devolver la respuesta exitosa
     res.json(data);
 
   } catch (err) {
