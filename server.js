@@ -88,8 +88,8 @@ ${prompt}`;
     });
 
     // Obtener el texto de respuesta (el método .text es el más estándar en el SDK)
-    let text = response.text ? response.text() : "";
-
+   ("Tipo de response.text:", typeof response.text, response.text);
+let text = response.text || "";
     // Limpiar posibles marcadores de código Markdown
     text = text.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
 
