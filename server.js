@@ -3,6 +3,7 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Groq from "groq-sdk";
+import json5 from "json5"; // <--- NUEVA LIBRERÍA AÑADIDA
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -10,24 +11,16 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = process.env.PORT || 3000;
-// Modelo recomendado: mixtral-8x7b-32768. Si no funciona, puedes cambiarlo a llama-3.3-70b-versatile
-const MODEL = process.env.GROQ_MODEL || "mixtral-8x7b-32768";
+const MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
-// ==========================================
-// INSTRUCCIÓN SISTEMA (Reforzada)
-// ==========================================
-const SYSTEM = 
-    "Eres un experto en prompt engineering. " +
-    "Expande el prompt del usuario en una instrucción MUY LARGA (mínimo 200 palabras), profesional, detallada y estructurada, sin perder la intención original. " +
-    "IMPORTANTE: El campo 'optimizedPrompt' debe ser UN TEXTO LARGO (string), NO un objeto JSON. " +
-    "NUNCA uses llaves `{}` dentro del contenido de optimizedPrompt para delimitar secciones. " +
-    "Usa **Negritas** para los títulos de las secciones y saltos de línea `\\n` para separar párrafos. " +
-    "REGLAS ESTRICTAS DE SALIDA: " +
-    "1. DEVUELVE ÚNICAMENTE EL OBJETO JSON. NO añadas saludos ni explicaciones. " +
-    "2. Sigue EXACTAMENTE este molde: " +
-    "{ \"optimizedPrompt\": \"**Objetivo Principal:** texto... \\n**Contexto:** texto... \\n**Instrucciones:** pasos... \\n**Formato:** formato... \\n**Restricciones:** límites...\", " +
-    "\"analysis\": { \"score\": 0, \"objective\": 0, \"context\": 0, \"instructions\": 0, \"format\": 0, \"restrictions\": 0, \"diagnosis\": \"diagnóstico\", \"missingInformation\": [\"Falta 1\", \"Falta 2\"] }, " +
-    "\"improvements\": [\"Mejora 1\", \"Mejora 2\"] }";
+const SYSTEM = `Eres un experto en prompt engineering.
+Tu tarea es expandir el prompt del usuario en una instrucción MUY LARGA (mínimo 200 palabras), profesional, detallada y estructurada, sin perder la intención original.
+El campo 'optimizedPrompt' debe ser UN TEXTO LARGO (string).
+NUNCA uses llaves {} dentro del contenido de optimizedPrompt. Usa **Negritas** para los títulos de las secciones y \\n para saltos de línea.
+REGLAS ESTRICTAS DE SALIDA:
+1. DEVUELVE ÚNICAMENTE EL OBJETO JSON. NO añadas saludos ni explicaciones.
+2. Sigue EXACTAMENTE este molde:
+{ "optimizedPrompt": "**Objetivo Principal:** texto... \\n**Contexto:** texto... \\n**Instrucciones:** pasos... \\n**Formato:** formato... \\n**Restricciones:** límites...", "analysis": { "score": 0, "objective": 0, "context": 0, "instructions": 0, "format": 0, "restrictions": 0, "diagnosis": "diagnóstico", "missingInformation": ["Falta 1", "Falta 2"] }, "improvements": ["Mejora 1", "Mejora 2"] }`;
 
 const VALID_MODES = ["Auto", "Formal", "Creativo", "Técnico"];
 const VALID_DETAILS = ["Resumido", "Equilibrado", "Detallado"];
@@ -63,7 +56,11 @@ Detectar faltantes: ${detectMissing}
 PROMPT DEL USUARIO:
 ${prompt}`;
 
-    const ai = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    const ai = new Groq({ 
+      apiKey: process.env.GROQ_API_KEY,
+      timeout: 60000,
+      maxRetries: 3
+    });
 
     const response = await ai.chat.completions.create({
       model: MODEL,
@@ -71,12 +68,12 @@ ${prompt}`;
         { role: "system", content: SYSTEM },
         { role: "user", content: userInput }
       ],
-      temperature: 0.2, // Temperatura baja para que siga el molde al 100%
+      temperature: 0.1,
     });
 
     let text = response.choices[0]?.message?.content || "";
 
-    // === BLOQUE ROBUSTO DE EXTRACCIÓN DE JSON ===
+    // === BLOQUE DE EXTRACCIÓN DE JSON (AHORA CON JSON5) ===
     let cleanText = text.replace(/```json\s*/gi, "").replace(/```/gi, "").trim();
     const startIdx = cleanText.indexOf('{');
     const endIdx = cleanText.lastIndexOf('}');
@@ -88,25 +85,37 @@ ${prompt}`;
 
     let data;
     try {
+      // Intento estándar
       data = JSON.parse(jsonString);
     } catch (parseError) {
-      console.error("Error al parsear JSON de Groq. Texto original:", text);
-      return res.status(502).json({
-        error: "Groq tuvo problemas para generar el formato JSON. Vuelve a intentarlo.",
-      });
+      console.warn("JSON estándar falló. Intentando reparar con JSON5...");
+      try {
+        // Usamos JSON5, que es tolerante a saltos de línea literales y comillas sueltas
+        data = json5.parse(jsonString);
+        console.log("JSON reparado exitosamente con JSON5.");
+      } catch (json5Error) {
+        console.error("Error al parsear JSON de Groq incluso con JSON5. Texto original:", text);
+        return res.status(502).json({
+          error: "Groq generó un formato de JSON incorrecto. Vuelve a intentarlo.",
+        });
+      }
     }
-    // === FIN DEL BLOQUE ROBUSTO ===
+    // === FIN DEL BLOQUE ===
 
-    // 🛡️ ESCUDO DE SEGURIDAD: Si la IA se equivoca y mete un objeto dentro de optimizedPrompt, lo convierte a texto
     if (data.optimizedPrompt && typeof data.optimizedPrompt === 'object') {
         data.optimizedPrompt = JSON.stringify(data.optimizedPrompt, null, 2);
     }
 
-    // Devolver la respuesta exitosa
     res.json(data);
 
   } catch (err) {
     console.error("Error en /api/optimize:", err);
+
+    if (err.message && err.message.toLowerCase().includes('timeout')) {
+      return res.status(500).json({
+        error: "⏳ La conexión con Groq ha excedido el tiempo de espera. Comprueba tu conexión a Internet y vuelve a intentarlo.",
+      });
+    }
 
     const isQuotaError = (err.status === 429) || 
                          (err.message && err.message.toLowerCase().includes('quota'));
