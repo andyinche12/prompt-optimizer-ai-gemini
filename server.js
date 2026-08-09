@@ -10,17 +10,26 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = process.env.PORT || 3000;
-// Modelo recomendado gratuito y ultrarrápido en Groq
 const MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
+// ==========================================
+// NUEVA INSTRUCCIÓN PARA RESPUESTAS LARGAS Y ESTRUCTURADAS
+// ==========================================
 const SYSTEM = `Eres Prompt Optimizer AI, un especialista profesional en prompt engineering.
-Tu trabajo es transformar el prompt del usuario en una instrucción mucho más clara, precisa y útil SIN cambiar su intención.
-Analiza objetivo, contexto, instrucciones, formato, restricciones y ambigüedades.
-No inventes datos. Si falta información indispensable, indícala como faltante, pero no bloquees la optimización por datos secundarios.
-Evita convertir una solicitud sencilla en una respuesta innecesariamente complicada.
+Tu trabajo es transformar el prompt del usuario en una instrucción MUCHO MÁS LARGA, PROFUNDA y SUMAMENTE ESTRUCTURADA, sin cambiar su intención.
+
+El 'optimizedPrompt' debe ser un texto extenso que ocupe múltiples párrafos y secciones claramente definidas. Usa el siguiente formato de secciones:
+**Objetivo Principal:** [Define el propósito central de la tarea]
+**Contexto y Audiencia:** [Describe el entorno o para quién va dirigido]
+**Instrucciones Paso a Paso:** [Detalla una secuencia lógica de acciones que la IA debe seguir, incluyendo ejemplos concretos si aplica]
+**Formato de Salida Esperado:** [Especifica exactamente cómo debe verse el resultado final: lista, tabla, párrafo, código, etc.]
+**Restricciones y Limitaciones:** [Indica qué debe evitar la IA, límite de palabras, tono, o formato no permitido]
+
+Analiza el prompt en busca de ambigüedades. No inventes datos. Si falta información indispensable, indícala dentro del mismo 'optimizedPrompt' o en el campo 'missingInformation' de la respuesta JSON.
+
 Devuelve SIEMPRE JSON válido con exactamente estas claves:
 {
- "optimizedPrompt": "prompt listo para copiar y pegar",
+ "optimizedPrompt": "prompt largo y estructurado listo para copiar y pegar",
  "analysis": {
    "score": 0,
    "objective": 0,
@@ -33,8 +42,9 @@ Devuelve SIEMPRE JSON válido con exactamente estas claves:
  },
  "improvements": ["..."]
 }
-Los valores de score y cada métrica deben ser números enteros de 0 a 100.
-NO escribas absolutamente nada más que el JSON, ni saludos, ni explicaciones adicionales.`;
+Los valores de score y cada métrica deben ser números enteros de 0 a 100.`;
+
+// ==========================================
 
 const VALID_MODES = ["Auto", "Formal", "Creativo", "Técnico"];
 const VALID_DETAILS = ["Resumido", "Equilibrado", "Detallado"];
@@ -78,32 +88,26 @@ ${prompt}`;
         { role: "system", content: SYSTEM },
         { role: "user", content: userInput }
       ],
-      temperature: 0.7,
+      temperature: 0.5, // Bajado a 0.5 para que sea más estricto y estructurado
     });
 
     let text = response.choices[0]?.message?.content || "";
 
     // === BLOQUE ROBUSTO DE EXTRACCIÓN DE JSON ===
-    // 1. Limpiar bloques de código Markdown
     let cleanText = text.replace(/```json\s*/gi, "").replace(/```/gi, "").trim();
-
-    // 2. Encontrar el primer '{' y el último '}' para aislar el JSON puro
     const startIdx = cleanText.indexOf('{');
     const endIdx = cleanText.lastIndexOf('}');
 
     let jsonString = cleanText;
     if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-        // Cortamos exactamente desde la primera llave hasta la última
         jsonString = cleanText.substring(startIdx, endIdx + 1);
     }
 
-    // 3. Intentar parsear el JSON aislado
     let data;
     try {
       data = JSON.parse(jsonString);
     } catch (parseError) {
       console.error("Error al parsear JSON de Groq. Texto original:", text);
-      console.error("Intento de parseo con aislación:", jsonString);
       return res.status(502).json({
         error: "Groq respondió en un formato no válido. Intenta nuevamente.",
       });
@@ -115,7 +119,6 @@ ${prompt}`;
   } catch (err) {
     console.error("Error en /api/optimize:", err);
 
-    // Capturar error de cuota excedida (Groq también usa código 429)
     const isQuotaError = (err.status === 429) || 
                          (err.message && err.message.toLowerCase().includes('quota'));
 
